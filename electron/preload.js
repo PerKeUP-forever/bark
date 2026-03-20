@@ -16,4 +16,20 @@ contextBridge.exposeInMainWorld('api', {
 
   // 汇总统计
   getSummary: (projectId) => ipcRenderer.invoke('summary:get', projectId),
+
+  // 定额库
+  listQuota: (category) => ipcRenderer.invoke('quota:list', category),
+  createQuota: (item) => ipcRenderer.invoke('quota:create', item),
+  updateQuota: (id, fields) => ipcRenderer.invoke('quota:update', id, fields),
+  deleteQuota: (id) => ipcRenderer.invoke('quota:delete', id),
+
+  // 导出
+  exportExcel: (projectId) => ipcRenderer.invoke('export:excel', projectId),
+  exportPdf: (projectId) => ipcRenderer.invoke('export:pdf', projectId),
+
+  // 导入
+  importExcel: (projectId) => ipcRenderer.invoke('import:excel', projectId),
+
+  // 数据分析
+  getAnalytics: (projectId) => ipcRenderer.invoke('analytics:get', projectId),
 })

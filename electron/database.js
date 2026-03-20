@@ -44,6 +44,20 @@ function initialize() {
 
     CREATE INDEX IF NOT EXISTS idx_items_project ON budget_items(project_id);
     CREATE INDEX IF NOT EXISTS idx_items_parent ON budget_items(parent_id);
+
+    CREATE TABLE IF NOT EXISTS quota_library (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL,
+      spec TEXT DEFAULT '',
+      unit TEXT DEFAULT '',
+      unit_price REAL DEFAULT 0,
+      work_hours REAL DEFAULT 0,
+      remark TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_quota_category ON quota_library(category);
   `)
 }
 
@@ -179,6 +193,125 @@ function getSummary(projectId) {
   return { byCategory, total }
 }
 
+// ========== 定额库操作 ==========
+
+function getQuotaItems(category) {
+  if (category) {
+    return db.prepare('SELECT * FROM quota_library WHERE category = ? ORDER BY name ASC').all(category)
+  }
+  return db.prepare('SELECT * FROM quota_library ORDER BY category ASC, name ASC').all()
+}
+
+function createQuotaItem({ category, name, spec, unit, unit_price, work_hours, remark }) {
+  const result = db.prepare(`
+    INSERT INTO quota_library (category, name, spec, unit, unit_price, work_hours, remark)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(category || '', name || '', spec || '', unit || '', unit_price ?? 0, work_hours ?? 0, remark || '')
+  return db.prepare('SELECT * FROM quota_library WHERE id = ?').get(result.lastInsertRowid)
+}
+
+function updateQuotaItem(id, fields) {
+  const allowedFields = ['category', 'name', 'spec', 'unit', 'unit_price', 'work_hours', 'remark']
+  const updates = []
+  const values = []
+  for (const [key, value] of Object.entries(fields)) {
+    if (allowedFields.includes(key)) {
+      updates.push(`${key} = ?`)
+      values.push(value)
+    }
+  }
+  if (updates.length === 0) return null
+  values.push(id)
+  db.prepare(`UPDATE quota_library SET ${updates.join(', ')} WHERE id = ?`).run(...values)
+  return db.prepare('SELECT * FROM quota_library WHERE id = ?').get(id)
+}
+
+function deleteQuotaItem(id) {
+  db.prepare('DELETE FROM quota_library WHERE id = ?').run(id)
+  return { success: true }
+}
+
+// ========== 导出数据 ==========
+
+function getExportData(projectId) {
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId)
+  const items = db.prepare('SELECT * FROM budget_items WHERE project_id = ? ORDER BY sort_order ASC').all(projectId)
+  const summary = getSummary(projectId)
+  return { project, items, summary }
+}
+
+// ========== 批量导入 ==========
+
+function bulkCreateItems(projectId, itemsData) {
+  const transaction = db.transaction((items) => {
+    // 清除项目已有数据
+    db.prepare('DELETE FROM budget_items WHERE project_id = ?').run(projectId)
+
+    const idMap = {} // oldTempId -> newRealId
+
+    for (const item of items) {
+      const parentId = item._tempParentId ? (idMap[item._tempParentId] || null) : null
+      const result = db.prepare(`
+        INSERT INTO budget_items (project_id, parent_id, name, level, sort_order, category, spec, unit, quantity, unit_price, work_hours, remark)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        projectId, parentId,
+        item.name || '新项目', item.level ?? 0, item.sort_order ?? 0,
+        item.category || '', item.spec || '', item.unit || '',
+        item.quantity ?? 0, item.unit_price ?? 0, item.work_hours ?? 0, item.remark || ''
+      )
+      if (item._tempId) {
+        idMap[item._tempId] = result.lastInsertRowid
+      }
+    }
+
+    db.prepare('UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(projectId)
+  })
+
+  transaction(itemsData)
+  return getItems(projectId)
+}
+
+// ========== 数据分析 ==========
+
+function getAnalytics(projectId) {
+  // 按分部工程统计
+  const byDivision = db.prepare(`
+    SELECT
+      p.id, p.name,
+      COUNT(d.id) as item_count,
+      SUM(d.quantity * d.unit_price) as total_cost,
+      SUM(d.work_hours) as total_hours
+    FROM budget_items p
+    LEFT JOIN budget_items s ON s.parent_id = p.id AND s.level = 1
+    LEFT JOIN budget_items d ON d.parent_id = s.id AND d.level = 2
+    WHERE p.project_id = ? AND p.level = 0
+    GROUP BY p.id, p.name
+    ORDER BY p.sort_order ASC
+  `).all(projectId)
+
+  // 各费用类别明细
+  const categoryDetails = db.prepare(`
+    SELECT category, name, spec, unit, quantity, unit_price,
+           (quantity * unit_price) as amount, work_hours
+    FROM budget_items
+    WHERE project_id = ? AND level = 2 AND category != ''
+    ORDER BY category, name
+  `).all(projectId)
+
+  // 单价 Top 10
+  const topExpensive = db.prepare(`
+    SELECT name, spec, unit, quantity, unit_price,
+           (quantity * unit_price) as amount, category
+    FROM budget_items
+    WHERE project_id = ? AND level = 2
+    ORDER BY amount DESC
+    LIMIT 10
+  `).all(projectId)
+
+  return { byDivision, categoryDetails, topExpensive }
+}
+
 module.exports = {
   initialize,
   getProjects,
@@ -191,4 +324,11 @@ module.exports = {
   deleteItem,
   reorderItems,
   getSummary,
+  getQuotaItems,
+  createQuotaItem,
+  updateQuotaItem,
+  deleteQuotaItem,
+  getExportData,
+  bulkCreateItems,
+  getAnalytics,
 }

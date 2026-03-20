@@ -2,12 +2,19 @@ import React, { useState, useEffect, useCallback } from 'react'
 import Sidebar from './components/Sidebar'
 import BudgetTree from './components/BudgetTree'
 import SummaryBar from './components/SummaryBar'
+import QuotaLibrary from './components/QuotaLibrary'
+import AnalyticsPanel from './components/AnalyticsPanel'
 
 export default function App() {
   const [projects, setProjects] = useState([])
   const [activeProject, setActiveProject] = useState(null)
   const [items, setItems] = useState([])
   const [summary, setSummary] = useState(null)
+
+  // Phase 2 状态
+  const [showQuotaLibrary, setShowQuotaLibrary] = useState(false)
+  const [showAnalytics, setShowAnalytics] = useState(false)
+  const [exportStatus, setExportStatus] = useState(null)
 
   // 加载项目列表
   const loadProjects = useCallback(async () => {
@@ -64,6 +71,53 @@ export default function App() {
     if (activeProject?.id === id) setActiveProject(updated)
   }
 
+  // 导出 Excel
+  const handleExportExcel = async () => {
+    if (!activeProject) return
+    setExportStatus('正在导出 Excel...')
+    const result = await window.api.exportExcel(activeProject.id)
+    if (result.success) {
+      setExportStatus('导出成功！')
+    } else if (!result.canceled) {
+      setExportStatus(`导出失败：${result.error}`)
+    } else {
+      setExportStatus(null)
+    }
+    setTimeout(() => setExportStatus(null), 3000)
+  }
+
+  // 导出 PDF
+  const handleExportPdf = async () => {
+    if (!activeProject) return
+    setExportStatus('正在导出 PDF...')
+    const result = await window.api.exportPdf(activeProject.id)
+    if (result.success) {
+      setExportStatus('PDF 导出成功！')
+    } else if (!result.canceled) {
+      setExportStatus(`导出失败：${result.error}`)
+    } else {
+      setExportStatus(null)
+    }
+    setTimeout(() => setExportStatus(null), 3000)
+  }
+
+  // 导入 Excel
+  const handleImportExcel = async () => {
+    if (!activeProject) return
+    if (!confirm('导入将会覆盖当前项目的所有预算数据，确定继续？')) return
+    setExportStatus('正在导入...')
+    const result = await window.api.importExcel(activeProject.id)
+    if (result.success) {
+      setExportStatus(`导入成功！共导入 ${result.count} 条数据`)
+      refresh()
+    } else if (!result.canceled) {
+      setExportStatus(`导入失败：${result.error}`)
+    } else {
+      setExportStatus(null)
+    }
+    setTimeout(() => setExportStatus(null), 3000)
+  }
+
   // 构建树形结构
   const buildTree = (flatItems) => {
     const map = {}
@@ -103,9 +157,43 @@ export default function App() {
         {activeProject ? (
           <>
             <div className="main-header">
-              <h1>{activeProject.name}</h1>
-              <span className="project-desc">{activeProject.description}</span>
+              <div className="header-left">
+                <h1>{activeProject.name}</h1>
+                <span className="project-desc">{activeProject.description}</span>
+              </div>
+              <div className="header-actions">
+                <button className="btn btn-action" onClick={handleImportExcel} title="导入 Excel">
+                  <span className="action-icon">↓</span> 导入
+                </button>
+                <button className="btn btn-action" onClick={handleExportExcel} title="导出 Excel">
+                  <span className="action-icon">↑</span> 导出Excel
+                </button>
+                <button className="btn btn-action" onClick={handleExportPdf} title="导出 PDF">
+                  <span className="action-icon">↑</span> 导出PDF
+                </button>
+                <button
+                  className="btn btn-action"
+                  onClick={() => setShowQuotaLibrary(true)}
+                  title="定额库"
+                >
+                  <span className="action-icon">☰</span> 定额库
+                </button>
+                <button
+                  className="btn btn-action btn-analytics"
+                  onClick={() => setShowAnalytics(true)}
+                  title="数据分析"
+                >
+                  <span className="action-icon">▤</span> 分析
+                </button>
+              </div>
             </div>
+
+            {exportStatus && (
+              <div className={`status-toast ${exportStatus.includes('失败') ? 'error' : ''}`}>
+                {exportStatus}
+              </div>
+            )}
+
             <SummaryBar summary={summary} />
             <BudgetTree
               tree={tree}
@@ -124,6 +212,20 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {showQuotaLibrary && (
+        <QuotaLibrary
+          onClose={() => setShowQuotaLibrary(false)}
+        />
+      )}
+
+      {showAnalytics && activeProject && (
+        <AnalyticsPanel
+          projectId={activeProject.id}
+          summary={summary}
+          onClose={() => setShowAnalytics(false)}
+        />
+      )}
     </div>
   )
 }

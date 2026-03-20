@@ -1,2 +1,9 @@
-__pycache__/
-suno_bark.egg-info/
+node_modules/
+dist/
+dist-electron/
+out/
+*.db
+*.db-journal
+.env
+.DS_Store
+Thumbs.db

@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   updateQuota: (id, fields) => ipcRenderer.invoke('quota:update', id, fields),
   deleteQuota: (id) => ipcRenderer.invoke('quota:delete', id),
   importQuota: (options) => ipcRenderer.invoke('quota:import', options),
+  seedQuota: () => ipcRenderer.invoke('quota:seed'),
 
   // 导出
   exportExcel: (projectId) => ipcRenderer.invoke('export:excel', projectId),

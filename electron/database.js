@@ -280,10 +280,12 @@ function bulkCreateQuotaItems(items, clearExisting = false) {
 
 // ========== 预设定额库 ==========
 
-function seedPresetQuotaItems() {
-  // 检查是否已有数据，有则不重复播种
-  const count = db.prepare('SELECT COUNT(*) as c FROM quota_library').get().c
-  if (count > 0) return { seeded: false, count }
+function seedPresetQuotaItems(force = false) {
+  // 非强制模式下，已有数据则不重复播种
+  if (!force) {
+    const count = db.prepare('SELECT COUNT(*) as c FROM quota_library').get().c
+    if (count > 0) return { seeded: false, count }
+  }
 
   const presets = [
     // ===== 人工费 =====
@@ -404,11 +406,16 @@ function seedPresetQuotaItems() {
     { category: 'rental', name: '高空作业车', spec: '16m', unit: '台班', unit_price: 1500, work_hours: 0, remark: '' },
   ]
 
+  // 强制模式使用去重逻辑，非强制模式（首次播种）直接插入
+  if (force) {
+    const result = bulkCreateQuotaItems(presets, false)
+    return { seeded: true, ...result }
+  }
+
   const stmt = db.prepare(`
     INSERT INTO quota_library (category, name, spec, unit, unit_price, work_hours, remark)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `)
-
   const transaction = db.transaction(() => {
     for (const item of presets) {
       stmt.run(item.category, item.name, item.spec, item.unit, item.unit_price, item.work_hours, item.remark)
@@ -416,7 +423,7 @@ function seedPresetQuotaItems() {
   })
   transaction()
 
-  return { seeded: true, count: presets.length }
+  return { seeded: true, inserted: presets.length, skipped: 0 }
 }
 
 // ========== 导出数据 ==========

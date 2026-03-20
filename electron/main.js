@@ -324,6 +324,9 @@ ipcMain.handle('import:excel', async (_, projectId) => {
   }
 })
 
+// ========== 定额库预设播种 IPC ==========
+ipcMain.handle('quota:seed', () => db.seedPresetQuotaItems(true))
+
 // ========== 定额库导入 IPC ==========
 
 const CATEGORY_MAP = { '人工费': 'labor', '材料费': 'material', '设备费': 'equipment', '机械租赁费': 'rental' }

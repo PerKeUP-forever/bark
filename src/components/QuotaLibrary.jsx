@@ -45,6 +45,20 @@ export default function QuotaLibrary({ onApply, onClose }) {
     loadItems()
   }
 
+  const handleSeed = async () => {
+    const result = await window.api.seedQuota()
+    if (result.seeded) {
+      const parts = [`成功加载 ${result.inserted} 条预设定额`]
+      if (result.skipped > 0) {
+        parts.push(`跳过 ${result.skipped} 条已存在的数据`)
+      }
+      alert(parts.join('\n'))
+      loadItems()
+    } else {
+      alert('预设数据已全部存在，无新增数据')
+    }
+  }
+
   const handleImport = async (clearExisting = false) => {
     const result = await window.api.importQuota({ clearExisting })
     if (result.canceled) return
@@ -114,6 +128,13 @@ export default function QuotaLibrary({ onApply, onClose }) {
           />
           <button className="btn btn-primary btn-sm-action" onClick={handleCreate}>
             + 新增定额
+          </button>
+          <button
+            className="btn btn-sm-action"
+            onClick={handleSeed}
+            title="加载管道/机电安装行业常用预设定额（自动跳过已存在项）"
+          >
+            加载预设
           </button>
           <button
             className="btn btn-sm-action"

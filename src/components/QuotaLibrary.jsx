@@ -45,6 +45,17 @@ export default function QuotaLibrary({ onApply, onClose }) {
     loadItems()
   }
 
+  const handleImport = async (clearExisting = false) => {
+    const result = await window.api.importQuota({ clearExisting })
+    if (result.canceled) return
+    if (result.success) {
+      alert(`成功导入 ${result.count} 条定额数据`)
+      loadItems()
+    } else {
+      alert('导入失败：' + result.error)
+    }
+  }
+
   const handleDelete = async (id) => {
     if (confirm('确定删除此定额项？')) {
       await window.api.deleteQuota(id)
@@ -99,6 +110,24 @@ export default function QuotaLibrary({ onApply, onClose }) {
           />
           <button className="btn btn-primary btn-sm-action" onClick={handleCreate}>
             + 新增定额
+          </button>
+          <button
+            className="btn btn-sm-action"
+            onClick={() => handleImport(false)}
+            title="从 Excel 文件追加导入定额数据"
+          >
+            导入 Excel
+          </button>
+          <button
+            className="btn btn-sm-action btn-warning"
+            onClick={() => {
+              if (confirm('覆盖导入将清空现有定额库数据，确定继续？')) {
+                handleImport(true)
+              }
+            }}
+            title="清空现有数据后从 Excel 导入"
+          >
+            覆盖导入
           </button>
         </div>
 

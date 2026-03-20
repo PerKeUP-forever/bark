@@ -231,6 +231,36 @@ function deleteQuotaItem(id) {
   return { success: true }
 }
 
+function bulkCreateQuotaItems(items, clearExisting = false) {
+  const transaction = db.transaction((items) => {
+    if (clearExisting) {
+      db.prepare('DELETE FROM quota_library').run()
+    }
+
+    const stmt = db.prepare(`
+      INSERT INTO quota_library (category, name, spec, unit, unit_price, work_hours, remark)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+
+    let count = 0
+    for (const item of items) {
+      stmt.run(
+        item.category || '',
+        item.name || '',
+        item.spec || '',
+        item.unit || '',
+        item.unit_price ?? 0,
+        item.work_hours ?? 0,
+        item.remark || ''
+      )
+      count++
+    }
+    return count
+  })
+
+  return transaction(items)
+}
+
 // ========== 导出数据 ==========
 
 function getExportData(projectId) {
@@ -330,5 +360,6 @@ module.exports = {
   deleteQuotaItem,
   getExportData,
   bulkCreateItems,
+  bulkCreateQuotaItems,
   getAnalytics,
 }

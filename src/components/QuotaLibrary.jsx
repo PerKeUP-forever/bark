@@ -49,7 +49,11 @@ export default function QuotaLibrary({ onApply, onClose }) {
     const result = await window.api.importQuota({ clearExisting })
     if (result.canceled) return
     if (result.success) {
-      alert(`成功导入 ${result.count} 条定额数据`)
+      const parts = [`成功导入 ${result.inserted} 条定额数据`]
+      if (result.skipped > 0) {
+        parts.push(`跳过 ${result.skipped} 条重复数据（按"类别+名称+规格"判断）`)
+      }
+      alert(parts.join('\n'))
       loadItems()
     } else {
       alert('导入失败：' + result.error)
@@ -114,9 +118,9 @@ export default function QuotaLibrary({ onApply, onClose }) {
           <button
             className="btn btn-sm-action"
             onClick={() => handleImport(false)}
-            title="从 Excel 文件追加导入定额数据"
+            title="从 Excel/CSV 文件追加导入定额数据（自动跳过重复项）"
           >
-            导入 Excel
+            导入数据
           </button>
           <button
             className="btn btn-sm-action btn-warning"

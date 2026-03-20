@@ -30,6 +30,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   db.initialize()
+  db.seedPresetQuotaItems()
   createWindow()
 
   app.on('activate', () => {
@@ -324,74 +325,138 @@ ipcMain.handle('import:excel', async (_, projectId) => {
 })
 
 // ========== 定额库导入 IPC ==========
+
+const CATEGORY_MAP = { '人工费': 'labor', '材料费': 'material', '设备费': 'equipment', '机械租赁费': 'rental' }
+
+function matchColumns(headerValues) {
+  const colMap = {}
+  headerValues.forEach((val, index) => {
+    const s = String(val || '').trim()
+    if (/名称|项目名/.test(s)) colMap.name = index
+    else if (/类别|费用/.test(s)) colMap.category = index
+    else if (/规格|型号/.test(s)) colMap.spec = index
+    else if (/单位/.test(s) && !colMap.unit) colMap.unit = index
+    else if (/单价|价格/.test(s)) colMap.unit_price = index
+    else if (/工时|工日/.test(s)) colMap.work_hours = index
+    else if (/备注|说明/.test(s)) colMap.remark = index
+  })
+  return colMap
+}
+
+function parseRowToItem(values, colMap) {
+  const get = (field, fallback) => String(values[colMap[field] ?? fallback] || '').trim()
+  const name = get('name', 1)
+  if (!name) return null
+
+  const catStr = get('category', 0)
+  return {
+    category: CATEGORY_MAP[catStr] || catStr || '',
+    name,
+    spec: get('spec', 2),
+    unit: get('unit', 3),
+    unit_price: parseFloat(values[colMap.unit_price ?? 4]) || 0,
+    work_hours: parseFloat(values[colMap.work_hours ?? 5]) || 0,
+    remark: get('remark', 6),
+  }
+}
+
+function parseCsvContent(content) {
+  const lines = content.split(/\r?\n/).filter(line => line.trim())
+  if (lines.length < 2) return []
+
+  // 简易 CSV 解析，支持引号内的逗号
+  const parseLine = (line) => {
+    const result = []
+    let current = ''
+    let inQuotes = false
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') { current += '"'; i++ }
+        else inQuotes = !inQuotes
+      } else if (ch === ',' && !inQuotes) {
+        result.push(current.trim())
+        current = ''
+      } else {
+        current += ch
+      }
+    }
+    result.push(current.trim())
+    return result
+  }
+
+  const headerValues = parseLine(lines[0])
+  const colMap = matchColumns(headerValues)
+  // 如果没有匹配到名称列，使用默认列序
+  if (colMap.name === undefined) {
+    colMap.category = 0; colMap.name = 1; colMap.spec = 2; colMap.unit = 3
+    colMap.unit_price = 4; colMap.work_hours = 5; colMap.remark = 6
+  }
+
+  const items = []
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseLine(lines[i])
+    const item = parseRowToItem(values, colMap)
+    if (item) items.push(item)
+  }
+  return items
+}
+
 ipcMain.handle('quota:import', async (_, options) => {
   const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    title: '导入定额库 Excel',
-    filters: [{ name: 'Excel 文件', extensions: ['xlsx', 'xls'] }],
+    title: '导入定额库',
+    filters: [
+      { name: 'Excel/CSV 文件', extensions: ['xlsx', 'xls', 'csv'] },
+      { name: 'Excel 文件', extensions: ['xlsx', 'xls'] },
+      { name: 'CSV 文件', extensions: ['csv'] },
+    ],
     properties: ['openFile'],
   })
   if (canceled || !filePaths.length) return { success: false, canceled: true }
 
   try {
-    const ExcelJS = require('exceljs')
-    const workbook = new ExcelJS.Workbook()
-    await workbook.xlsx.readFile(filePaths[0])
-    const ws = workbook.worksheets[0]
-    if (!ws) return { success: false, error: '文件中没有工作表' }
+    const filePath = filePaths[0]
+    const ext = path.extname(filePath).toLowerCase()
+    let items = []
 
-    // 读取表头，自动匹配列
-    const headerRow = ws.getRow(1)
-    const colMap = {}
-    headerRow.eachCell((cell, colNumber) => {
-      const val = String(cell.value || '').trim()
-      if (/名称|项目名/.test(val)) colMap.name = colNumber
-      else if (/类别|费用/.test(val)) colMap.category = colNumber
-      else if (/规格|型号/.test(val)) colMap.spec = colNumber
-      else if (/单位/.test(val)) colMap.unit = colNumber
-      else if (/单价|价格/.test(val)) colMap.unit_price = colNumber
-      else if (/工时|工日/.test(val)) colMap.work_hours = colNumber
-      else if (/备注|说明/.test(val)) colMap.remark = colNumber
-    })
+    if (ext === '.csv') {
+      // CSV 解析
+      const content = fs.readFileSync(filePath, 'utf-8')
+      items = parseCsvContent(content)
+    } else {
+      // Excel 解析
+      const ExcelJS = require('exceljs')
+      const workbook = new ExcelJS.Workbook()
+      await workbook.xlsx.readFile(filePath)
+      const ws = workbook.worksheets[0]
+      if (!ws) return { success: false, error: '文件中没有工作表' }
 
-    // 如果没匹配到名称列，尝试按顺序：类别、名称、规格、单位、单价、工时、备注
-    if (!colMap.name) {
-      colMap.category = 1
-      colMap.name = 2
-      colMap.spec = 3
-      colMap.unit = 4
-      colMap.unit_price = 5
-      colMap.work_hours = 6
-      colMap.remark = 7
-    }
+      // 读取表头
+      const headerRow = ws.getRow(1)
+      const headerValues = []
+      headerRow.eachCell((cell, colNumber) => { headerValues[colNumber - 1] = cell.value })
+      const colMap = matchColumns(headerValues)
+      if (colMap.name === undefined) {
+        colMap.category = 0; colMap.name = 1; colMap.spec = 2; colMap.unit = 3
+        colMap.unit_price = 4; colMap.work_hours = 5; colMap.remark = 6
+      }
 
-    const categoryMap = { '人工费': 'labor', '材料费': 'material', '设备费': 'equipment', '机械租赁费': 'rental' }
-
-    const items = []
-    ws.eachRow((row, rowNumber) => {
-      if (rowNumber <= 1) return // 跳过表头
-      const name = String(row.getCell(colMap.name || 2).value || '').trim()
-      if (!name) return
-
-      const catStr = String(row.getCell(colMap.category || 1).value || '').trim()
-
-      items.push({
-        category: categoryMap[catStr] || catStr || '',
-        name,
-        spec: String(row.getCell(colMap.spec || 3).value || '').trim(),
-        unit: String(row.getCell(colMap.unit || 4).value || '').trim(),
-        unit_price: parseFloat(row.getCell(colMap.unit_price || 5).value) || 0,
-        work_hours: parseFloat(row.getCell(colMap.work_hours || 6).value) || 0,
-        remark: String(row.getCell(colMap.remark || 7).value || '').trim(),
+      ws.eachRow((row, rowNumber) => {
+        if (rowNumber <= 1) return
+        const values = []
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => { values[colNumber - 1] = cell.value })
+        const item = parseRowToItem(values, colMap)
+        if (item) items.push(item)
       })
-    })
+    }
 
     if (items.length === 0) {
       return { success: false, error: '未解析到有效数据，请检查文件格式' }
     }
 
     const clearExisting = options?.clearExisting || false
-    const count = db.bulkCreateQuotaItems(items, clearExisting)
-    return { success: true, count }
+    const result = db.bulkCreateQuotaItems(items, clearExisting)
+    return { success: true, ...result, total: items.length }
   } catch (err) {
     return { success: false, error: err.message }
   }

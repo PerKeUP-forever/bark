@@ -237,28 +237,186 @@ function bulkCreateQuotaItems(items, clearExisting = false) {
       db.prepare('DELETE FROM quota_library').run()
     }
 
-    const stmt = db.prepare(`
+    const insertStmt = db.prepare(`
       INSERT INTO quota_library (category, name, spec, unit, unit_price, work_hours, remark)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `)
 
-    let count = 0
+    // 去重：按 category + name + spec 判断是否已存在
+    const checkStmt = db.prepare(
+      'SELECT id FROM quota_library WHERE category = ? AND name = ? AND spec = ?'
+    )
+
+    let inserted = 0
+    let skipped = 0
     for (const item of items) {
-      stmt.run(
-        item.category || '',
-        item.name || '',
-        item.spec || '',
+      const category = item.category || ''
+      const name = item.name || ''
+      const spec = item.spec || ''
+
+      // 覆盖模式下已清空，无需检查
+      if (!clearExisting) {
+        const existing = checkStmt.get(category, name, spec)
+        if (existing) {
+          skipped++
+          continue
+        }
+      }
+
+      insertStmt.run(
+        category, name, spec,
         item.unit || '',
         item.unit_price ?? 0,
         item.work_hours ?? 0,
         item.remark || ''
       )
-      count++
+      inserted++
     }
-    return count
+    return { inserted, skipped }
   })
 
   return transaction(items)
+}
+
+// ========== 预设定额库 ==========
+
+function seedPresetQuotaItems() {
+  // 检查是否已有数据，有则不重复播种
+  const count = db.prepare('SELECT COUNT(*) as c FROM quota_library').get().c
+  if (count > 0) return { seeded: false, count }
+
+  const presets = [
+    // ===== 人工费 =====
+    { category: 'labor', name: '管道安装工', spec: '普通', unit: '工日', unit_price: 350, work_hours: 1, remark: '' },
+    { category: 'labor', name: '管道安装工', spec: '高级', unit: '工日', unit_price: 500, work_hours: 1, remark: '' },
+    { category: 'labor', name: '电焊工', spec: '普通', unit: '工日', unit_price: 400, work_hours: 1, remark: '' },
+    { category: 'labor', name: '电焊工', spec: '高级/持证', unit: '工日', unit_price: 600, work_hours: 1, remark: '特种作业' },
+    { category: 'labor', name: '电工', spec: '普通', unit: '工日', unit_price: 350, work_hours: 1, remark: '' },
+    { category: 'labor', name: '电工', spec: '高级/持证', unit: '工日', unit_price: 500, work_hours: 1, remark: '' },
+    { category: 'labor', name: '普通技工', spec: '', unit: '工日', unit_price: 300, work_hours: 1, remark: '' },
+    { category: 'labor', name: '普通力工', spec: '', unit: '工日', unit_price: 200, work_hours: 1, remark: '' },
+    { category: 'labor', name: '起重工', spec: '', unit: '工日', unit_price: 400, work_hours: 1, remark: '' },
+    { category: 'labor', name: '测量放线工', spec: '', unit: '工日', unit_price: 350, work_hours: 1, remark: '' },
+
+    // ===== 材料费 - 管道类 =====
+    { category: 'material', name: '镀锌钢管', spec: 'DN15', unit: 'm', unit_price: 12, work_hours: 0, remark: '' },
+    { category: 'material', name: '镀锌钢管', spec: 'DN20', unit: 'm', unit_price: 16, work_hours: 0, remark: '' },
+    { category: 'material', name: '镀锌钢管', spec: 'DN25', unit: 'm', unit_price: 22, work_hours: 0, remark: '' },
+    { category: 'material', name: '镀锌钢管', spec: 'DN32', unit: 'm', unit_price: 28, work_hours: 0, remark: '' },
+    { category: 'material', name: '镀锌钢管', spec: 'DN40', unit: 'm', unit_price: 32, work_hours: 0, remark: '' },
+    { category: 'material', name: '镀锌钢管', spec: 'DN50', unit: 'm', unit_price: 42, work_hours: 0, remark: '' },
+    { category: 'material', name: '镀锌钢管', spec: 'DN65', unit: 'm', unit_price: 55, work_hours: 0, remark: '' },
+    { category: 'material', name: '镀锌钢管', spec: 'DN80', unit: 'm', unit_price: 68, work_hours: 0, remark: '' },
+    { category: 'material', name: '镀锌钢管', spec: 'DN100', unit: 'm', unit_price: 95, work_hours: 0, remark: '' },
+    { category: 'material', name: '镀锌钢管', spec: 'DN150', unit: 'm', unit_price: 145, work_hours: 0, remark: '' },
+    { category: 'material', name: '无缝钢管', spec: 'DN25', unit: 'm', unit_price: 30, work_hours: 0, remark: '' },
+    { category: 'material', name: '无缝钢管', spec: 'DN32', unit: 'm', unit_price: 38, work_hours: 0, remark: '' },
+    { category: 'material', name: '无缝钢管', spec: 'DN50', unit: 'm', unit_price: 55, work_hours: 0, remark: '' },
+    { category: 'material', name: '无缝钢管', spec: 'DN80', unit: 'm', unit_price: 85, work_hours: 0, remark: '' },
+    { category: 'material', name: '无缝钢管', spec: 'DN100', unit: 'm', unit_price: 120, work_hours: 0, remark: '' },
+    { category: 'material', name: 'PPR管', spec: 'DN20', unit: 'm', unit_price: 6, work_hours: 0, remark: '热水管' },
+    { category: 'material', name: 'PPR管', spec: 'DN25', unit: 'm', unit_price: 8, work_hours: 0, remark: '热水管' },
+    { category: 'material', name: 'PPR管', spec: 'DN32', unit: 'm', unit_price: 12, work_hours: 0, remark: '' },
+    { category: 'material', name: 'PPR管', spec: 'DN50', unit: 'm', unit_price: 22, work_hours: 0, remark: '' },
+    { category: 'material', name: 'PVC排水管', spec: 'DN50', unit: 'm', unit_price: 8, work_hours: 0, remark: '' },
+    { category: 'material', name: 'PVC排水管', spec: 'DN75', unit: 'm', unit_price: 12, work_hours: 0, remark: '' },
+    { category: 'material', name: 'PVC排水管', spec: 'DN110', unit: 'm', unit_price: 18, work_hours: 0, remark: '' },
+    { category: 'material', name: 'PVC排水管', spec: 'DN160', unit: 'm', unit_price: 30, work_hours: 0, remark: '' },
+
+    // ===== 材料费 - 阀门管件 =====
+    { category: 'material', name: '闸阀', spec: 'DN25', unit: '个', unit_price: 35, work_hours: 0, remark: '' },
+    { category: 'material', name: '闸阀', spec: 'DN50', unit: '个', unit_price: 80, work_hours: 0, remark: '' },
+    { category: 'material', name: '闸阀', spec: 'DN80', unit: '个', unit_price: 160, work_hours: 0, remark: '' },
+    { category: 'material', name: '闸阀', spec: 'DN100', unit: '个', unit_price: 250, work_hours: 0, remark: '' },
+    { category: 'material', name: '球阀', spec: 'DN15', unit: '个', unit_price: 15, work_hours: 0, remark: '' },
+    { category: 'material', name: '球阀', spec: 'DN20', unit: '个', unit_price: 20, work_hours: 0, remark: '' },
+    { category: 'material', name: '球阀', spec: 'DN25', unit: '个', unit_price: 28, work_hours: 0, remark: '' },
+    { category: 'material', name: '球阀', spec: 'DN50', unit: '个', unit_price: 65, work_hours: 0, remark: '' },
+    { category: 'material', name: '止回阀', spec: 'DN25', unit: '个', unit_price: 40, work_hours: 0, remark: '' },
+    { category: 'material', name: '止回阀', spec: 'DN50', unit: '个', unit_price: 95, work_hours: 0, remark: '' },
+    { category: 'material', name: '蝶阀', spec: 'DN100', unit: '个', unit_price: 280, work_hours: 0, remark: '' },
+    { category: 'material', name: '蝶阀', spec: 'DN150', unit: '个', unit_price: 450, work_hours: 0, remark: '' },
+    { category: 'material', name: '法兰', spec: 'DN50', unit: '片', unit_price: 25, work_hours: 0, remark: '' },
+    { category: 'material', name: '法兰', spec: 'DN80', unit: '片', unit_price: 35, work_hours: 0, remark: '' },
+    { category: 'material', name: '法兰', spec: 'DN100', unit: '片', unit_price: 45, work_hours: 0, remark: '' },
+    { category: 'material', name: '弯头', spec: 'DN25', unit: '个', unit_price: 5, work_hours: 0, remark: '90°' },
+    { category: 'material', name: '弯头', spec: 'DN50', unit: '个', unit_price: 12, work_hours: 0, remark: '90°' },
+    { category: 'material', name: '弯头', spec: 'DN80', unit: '个', unit_price: 22, work_hours: 0, remark: '90°' },
+    { category: 'material', name: '三通', spec: 'DN25', unit: '个', unit_price: 8, work_hours: 0, remark: '' },
+    { category: 'material', name: '三通', spec: 'DN50', unit: '个', unit_price: 18, work_hours: 0, remark: '' },
+
+    // ===== 材料费 - 电气类 =====
+    { category: 'material', name: 'BV电线', spec: '2.5mm²', unit: 'm', unit_price: 2.5, work_hours: 0, remark: '' },
+    { category: 'material', name: 'BV电线', spec: '4mm²', unit: 'm', unit_price: 3.8, work_hours: 0, remark: '' },
+    { category: 'material', name: 'BV电线', spec: '6mm²', unit: 'm', unit_price: 5.5, work_hours: 0, remark: '' },
+    { category: 'material', name: 'YJV电缆', spec: '3×2.5mm²', unit: 'm', unit_price: 12, work_hours: 0, remark: '' },
+    { category: 'material', name: 'YJV电缆', spec: '3×4mm²', unit: 'm', unit_price: 16, work_hours: 0, remark: '' },
+    { category: 'material', name: 'YJV电缆', spec: '3×6mm²', unit: 'm', unit_price: 22, work_hours: 0, remark: '' },
+    { category: 'material', name: 'YJV电缆', spec: '4×10mm²', unit: 'm', unit_price: 38, work_hours: 0, remark: '' },
+    { category: 'material', name: 'YJV电缆', spec: '4×16mm²', unit: 'm', unit_price: 55, work_hours: 0, remark: '' },
+    { category: 'material', name: 'YJV电缆', spec: '4×25mm²', unit: 'm', unit_price: 80, work_hours: 0, remark: '' },
+    { category: 'material', name: 'KBG管', spec: 'φ20', unit: 'm', unit_price: 4, work_hours: 0, remark: '穿线管' },
+    { category: 'material', name: 'KBG管', spec: 'φ25', unit: 'm', unit_price: 5.5, work_hours: 0, remark: '穿线管' },
+    { category: 'material', name: 'KBG管', spec: 'φ32', unit: 'm', unit_price: 7.5, work_hours: 0, remark: '穿线管' },
+    { category: 'material', name: '桥架', spec: '200×100', unit: 'm', unit_price: 45, work_hours: 0, remark: '镀锌' },
+    { category: 'material', name: '桥架', spec: '300×100', unit: 'm', unit_price: 60, work_hours: 0, remark: '镀锌' },
+    { category: 'material', name: '桥架', spec: '400×150', unit: 'm', unit_price: 85, work_hours: 0, remark: '镀锌' },
+    { category: 'material', name: '配电箱', spec: '明装 12位', unit: '个', unit_price: 120, work_hours: 0, remark: '' },
+    { category: 'material', name: '配电箱', spec: '明装 24位', unit: '个', unit_price: 200, work_hours: 0, remark: '' },
+    { category: 'material', name: '开关插座', spec: '单开', unit: '个', unit_price: 12, work_hours: 0, remark: '' },
+    { category: 'material', name: '开关插座', spec: '五孔', unit: '个', unit_price: 15, work_hours: 0, remark: '' },
+
+    // ===== 材料费 - 保温防腐 =====
+    { category: 'material', name: '橡塑保温', spec: '厚20mm', unit: 'm²', unit_price: 35, work_hours: 0, remark: '' },
+    { category: 'material', name: '橡塑保温', spec: '厚30mm', unit: 'm²', unit_price: 48, work_hours: 0, remark: '' },
+    { category: 'material', name: '岩棉管壳', spec: '厚30mm', unit: 'm', unit_price: 20, work_hours: 0, remark: '' },
+    { category: 'material', name: '岩棉管壳', spec: '厚50mm', unit: 'm', unit_price: 32, work_hours: 0, remark: '' },
+    { category: 'material', name: '防锈漆', spec: '', unit: 'kg', unit_price: 25, work_hours: 0, remark: '' },
+    { category: 'material', name: '面漆', spec: '', unit: 'kg', unit_price: 35, work_hours: 0, remark: '' },
+
+    // ===== 设备费 =====
+    { category: 'equipment', name: '离心水泵', spec: 'Q=10m³/h H=20m', unit: '台', unit_price: 3500, work_hours: 0, remark: '' },
+    { category: 'equipment', name: '离心水泵', spec: 'Q=20m³/h H=25m', unit: '台', unit_price: 5500, work_hours: 0, remark: '' },
+    { category: 'equipment', name: '离心水泵', spec: 'Q=50m³/h H=32m', unit: '台', unit_price: 12000, work_hours: 0, remark: '' },
+    { category: 'equipment', name: '排污泵', spec: 'Q=15m³/h', unit: '台', unit_price: 2800, work_hours: 0, remark: '' },
+    { category: 'equipment', name: '风机盘管', spec: 'FP-34', unit: '台', unit_price: 850, work_hours: 0, remark: '' },
+    { category: 'equipment', name: '风机盘管', spec: 'FP-51', unit: '台', unit_price: 1100, work_hours: 0, remark: '' },
+    { category: 'equipment', name: '风机盘管', spec: 'FP-68', unit: '台', unit_price: 1400, work_hours: 0, remark: '' },
+    { category: 'equipment', name: '新风机组', spec: '2000m³/h', unit: '台', unit_price: 8000, work_hours: 0, remark: '' },
+    { category: 'equipment', name: '新风机组', spec: '5000m³/h', unit: '台', unit_price: 15000, work_hours: 0, remark: '' },
+    { category: 'equipment', name: '空调主机', spec: '风冷模块 65kW', unit: '台', unit_price: 35000, work_hours: 0, remark: '' },
+    { category: 'equipment', name: '稳压罐', spec: 'SQL600×0.6', unit: '台', unit_price: 2200, work_hours: 0, remark: '' },
+    { category: 'equipment', name: '水箱', spec: '不锈钢 5m³', unit: '个', unit_price: 6000, work_hours: 0, remark: '' },
+    { category: 'equipment', name: '水箱', spec: '不锈钢 10m³', unit: '个', unit_price: 10000, work_hours: 0, remark: '' },
+
+    // ===== 机械租赁费 =====
+    { category: 'rental', name: '汽车吊', spec: '25t', unit: '台班', unit_price: 3500, work_hours: 0, remark: '' },
+    { category: 'rental', name: '汽车吊', spec: '50t', unit: '台班', unit_price: 6000, work_hours: 0, remark: '' },
+    { category: 'rental', name: '叉车', spec: '3t', unit: '台班', unit_price: 800, work_hours: 0, remark: '' },
+    { category: 'rental', name: '电焊机', spec: '交流 400A', unit: '台班', unit_price: 120, work_hours: 0, remark: '' },
+    { category: 'rental', name: '电焊机', spec: '直流 500A', unit: '台班', unit_price: 180, work_hours: 0, remark: '' },
+    { category: 'rental', name: '套丝机', spec: 'DN15-100', unit: '台班', unit_price: 100, work_hours: 0, remark: '' },
+    { category: 'rental', name: '液压弯管机', spec: '', unit: '台班', unit_price: 150, work_hours: 0, remark: '' },
+    { category: 'rental', name: '管道试压泵', spec: '', unit: '台班', unit_price: 80, work_hours: 0, remark: '' },
+    { category: 'rental', name: '脚手架', spec: '钢管', unit: 'm²·月', unit_price: 15, work_hours: 0, remark: '' },
+    { category: 'rental', name: '发电机', spec: '30kW', unit: '台班', unit_price: 350, work_hours: 0, remark: '' },
+    { category: 'rental', name: '空压机', spec: '0.6m³/min', unit: '台班', unit_price: 200, work_hours: 0, remark: '' },
+    { category: 'rental', name: '高空作业车', spec: '16m', unit: '台班', unit_price: 1500, work_hours: 0, remark: '' },
+  ]
+
+  const stmt = db.prepare(`
+    INSERT INTO quota_library (category, name, spec, unit, unit_price, work_hours, remark)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const transaction = db.transaction(() => {
+    for (const item of presets) {
+      stmt.run(item.category, item.name, item.spec, item.unit, item.unit_price, item.work_hours, item.remark)
+    }
+  })
+  transaction()
+
+  return { seeded: true, count: presets.length }
 }
 
 // ========== 导出数据 ==========
@@ -361,5 +519,6 @@ module.exports = {
   getExportData,
   bulkCreateItems,
   bulkCreateQuotaItems,
+  seedPresetQuotaItems,
   getAnalytics,
 }

@@ -30,7 +30,12 @@ function createWindow() {
 
 app.whenReady().then(() => {
   db.initialize()
-  db.seedPresetQuotaItems()
+  try {
+    const seedResult = db.seedPresetQuotaItems()
+    console.log('[定额库播种]', seedResult)
+  } catch (err) {
+    console.error('[定额库播种失败]', err)
+  }
   createWindow()
 
   app.on('activate', () => {

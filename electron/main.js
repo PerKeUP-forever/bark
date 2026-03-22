@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const db = require('./database')
+const { parsePdfQuota, parsePdfQuotaBatch } = require('./quotaParser')
 
 let mainWindow
 
@@ -411,60 +412,104 @@ function parseCsvContent(content) {
 }
 
 ipcMain.handle('quota:import', async (_, options) => {
+  // 如果已有预解析的 items（来自 PDF 预览确认），直接导入
+  if (options?.items?.length > 0) {
+    try {
+      const clearExisting = options.clearExisting || false
+      const result = db.bulkCreateQuotaItems(options.items, clearExisting)
+      return { success: true, ...result, total: options.items.length }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
+
   const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
     title: '导入定额库',
     filters: [
+      { name: '所有支持格式', extensions: ['xlsx', 'xls', 'csv', 'pdf'] },
+      { name: 'PDF 定额文件', extensions: ['pdf'] },
       { name: 'Excel/CSV 文件', extensions: ['xlsx', 'xls', 'csv'] },
-      { name: 'Excel 文件', extensions: ['xlsx', 'xls'] },
-      { name: 'CSV 文件', extensions: ['csv'] },
     ],
-    properties: ['openFile'],
+    properties: ['openFile', 'multiSelections'],
   })
   if (canceled || !filePaths.length) return { success: false, canceled: true }
 
   try {
-    const filePath = filePaths[0]
-    const ext = path.extname(filePath).toLowerCase()
     let items = []
 
-    if (ext === '.csv') {
-      // CSV 解析
-      const content = fs.readFileSync(filePath, 'utf-8')
-      items = parseCsvContent(content)
-    } else {
-      // Excel 解析
-      const ExcelJS = require('exceljs')
-      const workbook = new ExcelJS.Workbook()
-      await workbook.xlsx.readFile(filePath)
-      const ws = workbook.worksheets[0]
-      if (!ws) return { success: false, error: '文件中没有工作表' }
+    // 分类文件
+    const pdfFiles = filePaths.filter(f => path.extname(f).toLowerCase() === '.pdf')
+    const excelCsvFiles = filePaths.filter(f => path.extname(f).toLowerCase() !== '.pdf')
 
-      // 读取表头
-      const headerRow = ws.getRow(1)
-      const headerValues = []
-      headerRow.eachCell((cell, colNumber) => { headerValues[colNumber - 1] = cell.value })
-      const colMap = matchColumns(headerValues)
-      if (colMap.name === undefined) {
-        colMap.category = 0; colMap.name = 1; colMap.spec = 2; colMap.unit = 3
-        colMap.unit_price = 4; colMap.work_hours = 5; colMap.remark = 6
+    // 解析 PDF 文件
+    if (pdfFiles.length > 0) {
+      const pdfResult = await parsePdfQuotaBatch(pdfFiles)
+      items = items.concat(pdfResult.items)
+      console.log(`[PDF导入] 解析 ${pdfResult.totalFiles} 个PDF, ${pdfResult.totalPages} 页, 提取 ${pdfResult.items.length} 条资源`)
+    }
+
+    // 解析 Excel/CSV 文件
+    for (const filePath of excelCsvFiles) {
+      const ext = path.extname(filePath).toLowerCase()
+      if (ext === '.csv') {
+        const content = fs.readFileSync(filePath, 'utf-8')
+        items = items.concat(parseCsvContent(content))
+      } else {
+        const ExcelJS = require('exceljs')
+        const workbook = new ExcelJS.Workbook()
+        await workbook.xlsx.readFile(filePath)
+        const ws = workbook.worksheets[0]
+        if (!ws) continue
+
+        const headerRow = ws.getRow(1)
+        const headerValues = []
+        headerRow.eachCell((cell, colNumber) => { headerValues[colNumber - 1] = cell.value })
+        const colMap = matchColumns(headerValues)
+        if (colMap.name === undefined) {
+          colMap.category = 0; colMap.name = 1; colMap.spec = 2; colMap.unit = 3
+          colMap.unit_price = 4; colMap.work_hours = 5; colMap.remark = 6
+        }
+
+        ws.eachRow((row, rowNumber) => {
+          if (rowNumber <= 1) return
+          const values = []
+          row.eachCell({ includeEmpty: true }, (cell, colNumber) => { values[colNumber - 1] = cell.value })
+          const item = parseRowToItem(values, colMap)
+          if (item) items.push(item)
+        })
       }
-
-      ws.eachRow((row, rowNumber) => {
-        if (rowNumber <= 1) return
-        const values = []
-        row.eachCell({ includeEmpty: true }, (cell, colNumber) => { values[colNumber - 1] = cell.value })
-        const item = parseRowToItem(values, colMap)
-        if (item) items.push(item)
-      })
     }
 
     if (items.length === 0) {
-      return { success: false, error: '未解析到有效数据，请检查文件格式' }
+      return { success: false, error: '未解析到有效数据，请检查文件格式。\nPDF 需要是标准定额编制文件（含 8 位资源编码）' }
     }
 
     const clearExisting = options?.clearExisting || false
     const result = db.bulkCreateQuotaItems(items, clearExisting)
     return { success: true, ...result, total: items.length }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+// PDF 定额预览（解析但不导入，用于用户检查）
+ipcMain.handle('quota:previewPdf', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: '选择定额 PDF 文件（支持多选）',
+    filters: [{ name: 'PDF 文件', extensions: ['pdf'] }],
+    properties: ['openFile', 'multiSelections'],
+  })
+  if (canceled || !filePaths.length) return { canceled: true }
+
+  try {
+    const result = await parsePdfQuotaBatch(filePaths)
+    return {
+      success: true,
+      items: result.items,
+      sections: result.sections,
+      totalPages: result.totalPages,
+      totalFiles: result.totalFiles,
+    }
   } catch (err) {
     return { success: false, error: err.message }
   }

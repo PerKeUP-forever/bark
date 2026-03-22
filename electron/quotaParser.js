@@ -14,7 +14,7 @@
  *     994xxxxx = 其他费用
  */
 
-const pdfParse = require('pdf-parse')
+const { PDFParse } = require('pdf-parse')
 const fs = require('fs')
 
 // ---- 资源编码前缀 → 类别映射 ----
@@ -238,8 +238,9 @@ function resourcesToQuotaItems(resources) {
  */
 async function parsePdfQuota(filePath) {
   const buffer = fs.readFileSync(filePath)
-  const data = await pdfParse(buffer)
-  const text = data.text
+  const parser = new PDFParse({ data: new Uint8Array(buffer) })
+  const result = await parser.getText()
+  const text = result.text
 
   const parsed = parseQuotaText(text)
   const items = resourcesToQuotaItems(parsed.resources)
@@ -249,7 +250,7 @@ async function parsePdfQuota(filePath) {
     sections: parsed.sections,
     rawResources: parsed.resources,
     rawText: text,
-    pageCount: data.numpages,
+    pageCount: result.total,
   }
 }
 

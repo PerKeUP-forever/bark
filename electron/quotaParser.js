@@ -16,6 +16,10 @@
 
 const { PDFParse } = require('pdf-parse')
 const fs = require('fs')
+const path = require('path')
+
+// CMap 文件路径，用于正确解析中文嵌入字体
+const CMAP_URL = path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'cmaps') + path.sep
 
 // ---- 资源编码前缀 → 类别映射 ----
 function codeToCategory(code) {
@@ -238,7 +242,11 @@ function resourcesToQuotaItems(resources) {
  */
 async function parsePdfQuota(filePath) {
   const buffer = fs.readFileSync(filePath)
-  const parser = new PDFParse({ data: new Uint8Array(buffer) })
+  const parser = new PDFParse({
+    data: new Uint8Array(buffer),
+    cMapUrl: CMAP_URL,
+    cMapPacked: true,
+  })
   const result = await parser.getText()
   const text = result.text
 

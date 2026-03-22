@@ -17,9 +17,7 @@
 const { PDFParse } = require('pdf-parse')
 const fs = require('fs')
 const path = require('path')
-
-// CMap 文件路径，用于正确解析中文嵌入字体
-const CMAP_URL = path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'cmaps') + path.sep
+const { execFileSync } = require('child_process')
 
 // ---- 资源编码前缀 → 类别映射 ----
 function codeToCategory(code) {
@@ -236,19 +234,51 @@ function resourcesToQuotaItems(resources) {
 }
 
 /**
+ * 使用 poppler pdftotext 提取 PDF 文本（中文嵌入字体兼容性更好）
+ * @param {string} filePath
+ * @returns {{ text: string, pageCount: number } | null} 失败返回 null
+ */
+function extractWithPdftotext(filePath) {
+  try {
+    const text = execFileSync('pdftotext', ['-layout', filePath, '-'], {
+      encoding: 'utf-8',
+      maxBuffer: 50 * 1024 * 1024,
+    })
+    // 用 pdfinfo 获取页数
+    let pageCount = 0
+    try {
+      const info = execFileSync('pdfinfo', [filePath], { encoding: 'utf-8' })
+      const m = info.match(/Pages:\s*(\d+)/)
+      if (m) pageCount = parseInt(m[1], 10)
+    } catch { /* 页数获取失败不影响解析 */ }
+    return { text, pageCount }
+  } catch {
+    return null
+  }
+}
+
+/**
  * 解析 PDF 文件并返回可导入的定额数据
+ * 优先使用 poppler pdftotext（中文字体兼容性好），失败则回退到 pdf-parse
  * @param {string} filePath - PDF 文件路径
  * @returns {Promise<object>} { items: [], sections: [], rawText: '' }
  */
 async function parsePdfQuota(filePath) {
-  const buffer = fs.readFileSync(filePath)
-  const parser = new PDFParse({
-    data: new Uint8Array(buffer),
-    cMapUrl: CMAP_URL,
-    cMapPacked: true,
-  })
-  const result = await parser.getText()
-  const text = result.text
+  let text, pageCount
+
+  // 优先尝试 pdftotext（poppler），对中文嵌入字体的兼容性更好
+  const popplerResult = extractWithPdftotext(filePath)
+  if (popplerResult && popplerResult.text.trim().length > 0) {
+    text = popplerResult.text
+    pageCount = popplerResult.pageCount
+  } else {
+    // 回退到 pdf-parse (pdfjs-dist)
+    const buffer = fs.readFileSync(filePath)
+    const parser = new PDFParse({ data: new Uint8Array(buffer) })
+    const result = await parser.getText()
+    text = result.text
+    pageCount = result.total
+  }
 
   const parsed = parseQuotaText(text)
   const items = resourcesToQuotaItems(parsed.resources)
@@ -258,7 +288,7 @@ async function parsePdfQuota(filePath) {
     sections: parsed.sections,
     rawResources: parsed.resources,
     rawText: text,
-    pageCount: result.total,
+    pageCount,
   }
 }
 

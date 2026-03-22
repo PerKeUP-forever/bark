@@ -269,9 +269,11 @@ async function parsePdfQuota(filePath) {
   // 优先尝试 pdftotext（poppler），对中文嵌入字体的兼容性更好
   const popplerResult = extractWithPdftotext(filePath)
   if (popplerResult && popplerResult.text.trim().length > 0) {
+    console.log('[quotaParser] 使用 poppler pdftotext 提取:', filePath)
     text = popplerResult.text
     pageCount = popplerResult.pageCount
   } else {
+    console.log('[quotaParser] 回退到 pdf-parse (pdfjs-dist):', filePath)
     // 回退到 pdf-parse (pdfjs-dist)
     const buffer = fs.readFileSync(filePath)
     const parser = new PDFParse({ data: new Uint8Array(buffer) })

@@ -24,25 +24,120 @@ function codeToCategory(code) {
   if (!code) return 'material'
   const prefix = code.substring(0, 2)
   const n = parseInt(prefix, 10)
-  if (n === 0) return 'labor'        // 00 = 人工
-  if (n >= 98) return 'rental'       // 98-99 = 机械
-  return 'material'                   // 01-37 = 材料
+  if (n === 0) return 'labor'         // 00 = 人工
+  if (n >= 1 && n <= 37) return 'material'  // 01-37 = 材料
+  if (n >= 98) return 'rental'        // 98-99 = 机械
+  if (code.startsWith('994')) return 'material' // 994 = 其他费用
+  return 'material'
 }
 
-// 资源编码前缀 → 更细的中文类别描述
+// 资源编码 AA-BB-CCCC → 精细中文类别描述
+// AA = 大类(前2位)  BB = 中类(第3-4位)  CCCC = 顺序号(后4位)
 function codeToSubCategory(code) {
-  if (!code) return ''
-  const prefix = code.substring(0, 2)
-  const n = parseInt(prefix, 10)
-  if (n === 0) return '人工'
-  if (n === 1) return '金属材料'
-  if (n === 2) return '非金属材料'
-  if (n === 3) return '焊接材料'
-  if (n >= 13 && n <= 13) return '涂料'
-  if (n === 14) return '油料/气体'
-  if (n >= 27 && n <= 37) return '辅材'
-  if (n === 98) return '专用仪器'
-  if (n === 99) return '通用机械'
+  if (!code || code.length < 4) return ''
+  const major = parseInt(code.substring(0, 2), 10)  // AA 大类
+  const minor = parseInt(code.substring(2, 4), 10)  // BB 中类
+
+  // 00 = 人工
+  if (major === 0) {
+    if (minor === 1) return '人工-综合用工'
+    if (minor === 2) return '人工-技术用工'
+    if (minor === 3) return '人工-辅助用工'
+    return '人工'
+  }
+
+  // 01 = 黑色金属材料
+  if (major === 1) {
+    if (minor <= 2) return '金属-型钢/钢板'
+    if (minor === 3) return '金属-钢丝'
+    if (minor >= 4 && minor <= 6) return '金属-钢管'
+    if (minor >= 7 && minor <= 9) return '金属-钢板/带钢'
+    if (minor >= 10 && minor <= 12) return '金属-铸钢件'
+    if (minor >= 13 && minor <= 15) return '金属-铸铁件'
+    if (minor >= 16 && minor <= 19) return '金属-五金配件'
+    return '金属材料'
+  }
+
+  // 02 = 有色金属 / 非金属 / 化工材料
+  if (major === 2) {
+    if (minor <= 5) return '有色金属-铜材'
+    if (minor >= 6 && minor <= 10) return '有色金属-铝材'
+    if (minor >= 11 && minor <= 15) return '非金属-橡胶/塑料'
+    if (minor >= 16 && minor <= 20) return '非金属-石棉/密封'
+    if (minor >= 21 && minor <= 25) return '非金属-玻璃/陶瓷'
+    if (minor >= 26 && minor <= 30) return '化工-化学制品'
+    if (minor >= 31) return '化工-其他'
+    return '非金属/化工材料'
+  }
+
+  // 03 = 焊接材料
+  if (major === 3) {
+    if (minor <= 5) return '焊接-焊条'
+    if (minor >= 6 && minor <= 10) return '焊接-焊丝'
+    if (minor >= 11 && minor <= 15) return '焊接-焊剂/焊粉'
+    if (minor >= 16) return '焊接-辅料'
+    return '焊接材料'
+  }
+
+  // 04-12 = 其他材料细分
+  if (major >= 4 && major <= 6) return '木材/胶合板'
+  if (major >= 7 && major <= 9) return '水泥/混凝土制品'
+  if (major >= 10 && major <= 12) return '砖瓦/砂石'
+
+  // 13 = 涂料
+  if (major === 13) {
+    if (minor <= 2) return '涂料-防腐漆/面漆'
+    if (minor >= 3 && minor <= 5) return '涂料-防锈漆/底漆'
+    if (minor >= 6 && minor <= 8) return '涂料-调和漆'
+    if (minor >= 9) return '涂料-特种涂料'
+    return '涂料'
+  }
+
+  // 14 = 油料 / 气体
+  if (major === 14) {
+    if (minor <= 2) return '油料-润滑脂'
+    if (minor >= 3 && minor <= 5) return '油料-机油/润滑油'
+    if (minor >= 6 && minor <= 8) return '油料-液压油'
+    if (minor >= 9 && minor <= 15) return '油料-特种油料'
+    if (minor >= 16 && minor <= 29) return '油料-其他'
+    if (minor >= 30 && minor <= 35) return '气体-氧气/乙炔'
+    if (minor >= 36 && minor <= 39) return '气体-保护气/混合气'
+    if (minor >= 40) return '气体-其他气体'
+    return '油料/气体'
+  }
+
+  // 15-26 = 中间材料类别
+  if (major >= 15 && major <= 26) return '其他材料'
+
+  // 27-37 = 辅助材料
+  if (major >= 27 && major <= 37) {
+    if (major === 27) return '辅材-紧固件'
+    if (major === 28) return '辅材-密封件'
+    if (major === 29) return '辅材-绝缘材料'
+    if (major >= 30 && major <= 33) return '辅材-保温材料'
+    if (major >= 34 && major <= 37) return '辅材-周转材料'
+    return '辅助材料'
+  }
+
+  // 98 = 专用仪器仪表
+  if (major === 98) {
+    if (minor <= 10) return '仪器-测量仪器'
+    if (minor >= 11 && minor <= 20) return '仪器-检测仪器'
+    if (minor >= 21) return '仪器-其他仪器'
+    return '专用仪器'
+  }
+
+  // 99 = 通用施工机械
+  if (major === 99) {
+    if (minor <= 5) return '机械-起重机械'
+    if (minor >= 6 && minor <= 10) return '机械-运输机械'
+    if (minor >= 11 && minor <= 15) return '机械-焊接机械'
+    if (minor >= 16 && minor <= 20) return '机械-切割机械'
+    if (minor >= 21 && minor <= 30) return '机械-通用动力'
+    if (minor >= 40) return '机械-其他'
+    return '通用机械'
+  }
+
   return '材料'
 }
 

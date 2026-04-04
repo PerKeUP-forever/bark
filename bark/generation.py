@@ -1,3 +1,4 @@
+import configparser
 import contextlib
 import gc
 import os
@@ -81,17 +82,66 @@ logger = logging.getLogger(__name__)
 CUR_PATH = os.path.dirname(os.path.abspath(__file__))
 
 
-default_cache_dir = os.path.join(os.path.expanduser("~"), ".cache")
-CACHE_DIR = os.path.join(os.getenv("XDG_CACHE_HOME", default_cache_dir), "suno", "bark_v0")
+def _load_barkrc():
+    """Load configuration from .barkrc files.
+
+    Searches for .barkrc in the following locations (later files take precedence):
+      1. ~/.barkrc  (user-level config)
+      2. .barkrc    (project-level config)
+
+    The file uses INI format with a [bark] section, e.g.:
+
+        [bark]
+        USE_SMALL_MODELS = true
+        ENABLE_MPS = false
+        OFFLOAD_CPU = false
+        CACHE_DIR = /tmp/bark_cache
+
+    Environment variables always take precedence over .barkrc values.
+    """
+    config = configparser.ConfigParser()
+    rc_paths = [
+        os.path.join(os.path.expanduser("~"), ".barkrc"),
+        os.path.join(os.getcwd(), ".barkrc"),
+    ]
+    config.read(rc_paths)
+    return config
+
+
+def _get_config_value(rc_config, rc_key, env_key, default):
+    """Get a configuration value with precedence: env var > .barkrc > default."""
+    env_val = os.environ.get(env_key)
+    if env_val is not None:
+        return env_val
+    if rc_config.has_option("bark", rc_key):
+        return rc_config.get("bark", rc_key)
+    return default
+
+
+_rc_config = _load_barkrc()
 
 
 def _cast_bool_env_var(s):
     return s.lower() in ('true', '1', 't')
 
 
-USE_SMALL_MODELS = _cast_bool_env_var(os.environ.get("SUNO_USE_SMALL_MODELS", "False"))
-GLOBAL_ENABLE_MPS = _cast_bool_env_var(os.environ.get("SUNO_ENABLE_MPS", "False"))
-OFFLOAD_CPU = _cast_bool_env_var(os.environ.get("SUNO_OFFLOAD_CPU", "False"))
+default_cache_dir = os.path.join(os.path.expanduser("~"), ".cache")
+CACHE_DIR = os.path.join(
+    _get_config_value(_rc_config, "CACHE_DIR", "XDG_CACHE_HOME", default_cache_dir),
+    "suno",
+    "bark_v0",
+)
+
+
+USE_SMALL_MODELS = _cast_bool_env_var(
+    _get_config_value(_rc_config, "USE_SMALL_MODELS", "SUNO_USE_SMALL_MODELS", "False")
+)
+GLOBAL_ENABLE_MPS = _cast_bool_env_var(
+    _get_config_value(_rc_config, "ENABLE_MPS", "SUNO_ENABLE_MPS", "False")
+)
+OFFLOAD_CPU = _cast_bool_env_var(
+    _get_config_value(_rc_config, "OFFLOAD_CPU", "SUNO_OFFLOAD_CPU", "False")
+)
 
 
 REMOTE_MODEL_PATHS = {
